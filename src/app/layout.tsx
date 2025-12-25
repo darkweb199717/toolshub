@@ -9,7 +9,7 @@ import { Toaster } from "sonner";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-	title: "The Tools Hub - 60+ Free Online Tools",
+	title: "NWSTime - 60+ Free Online Tools",
 	description:
 		"Boost your productivity with our collection of 60+ powerful, free online tools. From SEO optimization to development utilities, password generators to calculators - all in one place.",
 	keywords:
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 	openGraph: {
 		type: "website",
 		locale: "en_US",
-		url: "https://www.yourdomain.com",
+		url: "https://www.nwstime.com",
 		title: "The Tools Hub - 60+ Free Online Tools",
 		description:
 			"Boost your productivity with our collection of powerful, free online tools.",
@@ -33,7 +33,7 @@ export const metadata: Metadata = {
 		description:
 			"Boost your productivity with our collection of powerful, free online tools.",
 		creator: "@thetoolshub",
-		images: ["https://www.yourdomain.com/og-image.jpg"],
+		images: ["https://www.nwstime.com/og-image.jpg"],
 	},
 };
 
