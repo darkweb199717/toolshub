@@ -47,7 +47,7 @@ export default function RootLayout({
 			<head suppressHydrationWarning>
 				<script
 					async
-					src="https://www.googletagmanager.com/gtag/js?id=G-B5D171KHWK"></script>
+					src='https://www.googletagmanager.com/gtag/js?id=XXXXXXXXXXXXX'
 				/>
 				<script
 					dangerouslySetInnerHTML={{
@@ -55,13 +55,13 @@ export default function RootLayout({
 						window.dataLayer = window.dataLayer || [];
 						function gtag(){dataLayer.push(arguments);}
 						gtag('js', new Date());
-						gtag('config', 'G-B5D171KHWK');
+						gtag('config', 'XXXXXXXX');
 					`,
 					}}
 				/>
 				<script
 					async
-					src='https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5350342127141103'
+					src='https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXXXXXXX'
 					crossOrigin='anonymous'
 				/>
 			</head>
