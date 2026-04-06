@@ -1,247 +1,466 @@
 "use client";
 
-import type { Metadata } from "next";
-import PDFSplitterClient from "./PDFSplitterClient";
+import type React from "react";
+import { useState, useRef } from "react";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import {
+	Upload,
+	Download,
+	FileText,
+	Split,
+	AlertCircle,
+	Package,
+} from "lucide-react";
+import { toast } from "sonner";
+import { PDFDocument } from "pdf-lib";
 
-export const metadata: Metadata = {
-	title: "PDF Splitter Online Free - Split PDF Pages Easily | NWSTime",
-	description:
-		"Split PDF files online for free. Extract pages, split by page ranges, or divide PDF into multiple files quickly and securely with NWSTime PDF Splitter.",
-	keywords: [
-		"pdf splitter",
-		"split pdf online",
-		"split pdf pages",
-		"extract pdf pages",
-		"free pdf splitter",
-		"pdf page splitter",
-		"online pdf tools",
-		"split large pdf",
-		"separate pdf pages",
-		"pdf file splitter",
-	],
-	alternates: {
-		canonical: "https://www.nwstime.com/tools/pdf-splitter",
-	},
-	openGraph: {
-		title: "PDF Splitter Online Free - Split PDF Pages Easily",
-		description:
-			"Split PDF files online for free. Extract pages, split by ranges, or create one PDF per page easily.",
-		url: "https://www.nwstime.com/tools/pdf-splitter",
-		siteName: "NWSTime",
-		type: "website",
-	},
-	twitter: {
-		card: "summary_large_image",
-		title: "PDF Splitter Online Free - NWSTime",
-		description:
-			"Split PDF files online for free with page ranges, custom page count, or one page per file.",
-	},
-	robots: {
-		index: true,
-		follow: true,
-	},
-};
+interface SplitResult {
+	files: {
+		name: string;
+		pages: string;
+		downloadUrl: string;
+	}[];
+	totalFiles: number;
+}
 
-export default function PDFSplitterPage() {
+export default function PDFSplitterClient() {
+	const [file, setFile] = useState<File | null>(null);
+	const [splitMode, setSplitMode] = useState("pages");
+	const [pageRanges, setPageRanges] = useState("");
+	const [pagesPerFile, setPagesPerFile] = useState("1");
+	const [isSplitting, setIsSplitting] = useState(false);
+	const [progress, setProgress] = useState(0);
+	const [result, setResult] = useState<SplitResult | null>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	const handleFileSelect = (selectedFile: File) => {
+		if (selectedFile.type !== "application/pdf") {
+			toast.error("Please select a PDF file");
+			return;
+		}
+
+		if (selectedFile.size > 50 * 1024 * 1024) {
+			toast.error("File size must be less than 50MB");
+			return;
+		}
+
+		setFile(selectedFile);
+		setResult(null);
+		toast.success("PDF file selected successfully");
+	};
+
+	const handleDrop = (e: React.DragEvent) => {
+		e.preventDefault();
+		const droppedFile = e.dataTransfer.files[0];
+		if (droppedFile) {
+			handleFileSelect(droppedFile);
+		}
+	};
+
+	const handleDragOver = (e: React.DragEvent) => {
+		e.preventDefault();
+	};
+
+	const splitPDF = async () => {
+		if (!file) {
+			toast.error("Please select a PDF file first");
+			return;
+		}
+
+		if (splitMode === "ranges" && !pageRanges.trim()) {
+			toast.error("Please specify page ranges");
+			return;
+		}
+
+		if (
+			splitMode === "pages" &&
+			(!pagesPerFile || Number.parseInt(pagesPerFile) < 1)
+		) {
+			toast.error("Please specify valid pages per file");
+			return;
+		}
+
+		setIsSplitting(true);
+		setProgress(0);
+
+		try {
+			const progressInterval = setInterval(() => {
+				setProgress((prev) => {
+					if (prev >= 90) {
+						clearInterval(progressInterval);
+						return 90;
+					}
+					return prev + 15;
+				});
+			}, 300);
+
+			const arrayBuffer = await file.arrayBuffer();
+			const pdfDoc = await PDFDocument.load(arrayBuffer);
+			const totalPages = pdfDoc.getPageCount();
+			const splitFiles: SplitResult["files"] = [];
+
+			if (splitMode === "pages") {
+				const pagesPerFileNum = Number.parseInt(pagesPerFile);
+				const numFiles = Math.ceil(totalPages / pagesPerFileNum);
+
+				for (let i = 0; i < numFiles; i++) {
+					const startPage = i * pagesPerFileNum;
+					const endPage = Math.min((i + 1) * pagesPerFileNum, totalPages);
+
+					const newPdf = await PDFDocument.create();
+					const copiedPages = await newPdf.copyPages(
+						pdfDoc,
+						Array.from(
+							{ length: endPage - startPage },
+							(_, idx) => startPage + idx
+						)
+					);
+
+					copiedPages.forEach((page) => newPdf.addPage(page));
+					const newBytes = await newPdf.save();
+					const blob = new Blob([newBytes], { type: "application/pdf" });
+
+					splitFiles.push({
+						name: `${file.name.replace(/\.pdf$/i, "")}_part_${i + 1}.pdf`,
+						pages:
+							startPage + 1 === endPage
+								? `Page ${startPage + 1}`
+								: `Pages ${startPage + 1}-${endPage}`,
+						downloadUrl: URL.createObjectURL(blob),
+					});
+				}
+			} else if (splitMode === "ranges") {
+				const ranges = pageRanges
+					.split(",")
+					.map((range) => range.trim())
+					.filter(Boolean);
+
+				for (let index = 0; index < ranges.length; index++) {
+					const range = ranges[index];
+					let [start, end] = range
+						.split("-")
+						.map((n) => parseInt(n.trim(), 10));
+
+					if (isNaN(start)) continue;
+					if (isNaN(end)) end = start;
+
+					start = Math.max(1, start);
+					end = Math.min(totalPages, end);
+
+					if (start > end) [start, end] = [end, start];
+
+					const newPdf = await PDFDocument.create();
+					const copiedPages = await newPdf.copyPages(
+						pdfDoc,
+						Array.from(
+							{ length: end - start + 1 },
+							(_, idx) => start - 1 + idx
+						)
+					);
+
+					copiedPages.forEach((page) => newPdf.addPage(page));
+					const newBytes = await newPdf.save();
+					const blob = new Blob([newBytes], { type: "application/pdf" });
+
+					splitFiles.push({
+						name: `${file.name.replace(/\.pdf$/i, "")}_range_${index + 1}.pdf`,
+						pages: start === end ? `Page ${start}` : `Pages ${start}-${end}`,
+						downloadUrl: URL.createObjectURL(blob),
+					});
+				}
+			} else if (splitMode === "single") {
+				for (let i = 0; i < totalPages; i++) {
+					const newPdf = await PDFDocument.create();
+					const [copiedPage] = await newPdf.copyPages(pdfDoc, [i]);
+					newPdf.addPage(copiedPage);
+
+					const newBytes = await newPdf.save();
+					const blob = new Blob([newBytes], { type: "application/pdf" });
+
+					splitFiles.push({
+						name: `${file.name.replace(/\.pdf$/i, "")}_page_${i + 1}.pdf`,
+						pages: `Page ${i + 1}`,
+						downloadUrl: URL.createObjectURL(blob),
+					});
+				}
+			}
+
+			setResult({
+				files: splitFiles,
+				totalFiles: splitFiles.length,
+			});
+
+			setProgress(100);
+			toast.success(`PDF split into ${splitFiles.length} files successfully!`);
+		} catch (error) {
+			toast.error("Failed to split PDF. Please try again.");
+		} finally {
+			setIsSplitting(false);
+		}
+	};
+
+	const downloadFile = (downloadUrl: string, fileName: string) => {
+		const link = document.createElement("a");
+		link.href = downloadUrl;
+		link.download = fileName;
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+		toast.success("Download started!");
+	};
+
+	const downloadAll = () => {
+		if (result) {
+			result.files.forEach((file, index) => {
+				setTimeout(() => {
+					downloadFile(file.downloadUrl, file.name);
+				}, index * 500);
+			});
+			toast.success("All files download started!");
+		}
+	};
+
+	const formatFileSize = (bytes: number) => {
+		if (bytes === 0) return "0 Bytes";
+		const k = 1024;
+		const sizes = ["Bytes", "KB", "MB", "GB"];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return (
+			Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) +
+			" " +
+			sizes[i]
+		);
+	};
+
 	return (
-		<div className='container mx-auto px-4 py-8'>
-			<div className='max-w-5xl mx-auto'>
-				{/* Hero Section */}
-				<section className='mb-10 text-center'>
-					<h1 className='text-4xl md:text-5xl font-bold mb-4'>
-						PDF Splitter Online Free
-					</h1>
-					<p className='text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto'>
-						Split PDF files into smaller documents online for free.
-						Extract specific pages, divide by page ranges, or create
-						one PDF per page quickly and securely.
-					</p>
-				</section>
-
-				{/* Tool */}
-				<section className='mb-12'>
-					<PDFSplitterClient />
-				</section>
-
-				{/* SEO Content */}
-				<section className='space-y-10'>
-					<div>
-						<h2 className='text-2xl font-bold mb-4'>
-							What Is a PDF Splitter?
-						</h2>
-						<p className='text-muted-foreground leading-7 mb-4'>
-							A PDF splitter is an online tool that allows you to
-							break a large PDF file into smaller PDF documents.
-							Instead of keeping all pages in one file, you can
-							separate selected pages, split a document by page
-							ranges, or save each page as an individual PDF.
+		<div className='grid gap-6 lg:grid-cols-2'>
+			<Card>
+				<CardHeader>
+					<CardTitle className='flex items-center gap-2'>
+						<Upload className='h-5 w-5' />
+						Upload & Configure
+					</CardTitle>
+					<CardDescription>
+						Select a PDF file and choose splitting options
+					</CardDescription>
+				</CardHeader>
+				<CardContent className='space-y-4'>
+					<div
+						className='border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-gray-400 transition-colors'
+						onDrop={handleDrop}
+						onDragOver={handleDragOver}
+						onClick={() => fileInputRef.current?.click()}>
+						<FileText className='h-12 w-12 mx-auto mb-4 text-gray-400' />
+						<p className='text-lg font-medium mb-2'>
+							Drop PDF file here or click to browse
 						</p>
-						<p className='text-muted-foreground leading-7'>
-							This is useful for students, office workers,
-							business owners, teachers, and anyone who needs to
-							organize, share, or extract parts of a PDF document
-							without editing the original file manually.
+						<p className='text-sm text-muted-foreground'>
+							Supports PDF files up to 50MB
 						</p>
+						<input
+							ref={fileInputRef}
+							type='file'
+							accept='.pdf'
+							onChange={(e) =>
+								e.target.files?.[0] &&
+								handleFileSelect(e.target.files[0])
+							}
+							className='hidden'
+						/>
 					</div>
 
-					<div>
-						<h2 className='text-2xl font-bold mb-4'>
-							How to Split a PDF Online
-						</h2>
-						<div className='grid md:grid-cols-3 gap-6'>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold text-lg mb-2'>
-									1. Upload Your PDF
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Choose your PDF file from your device or drag
-									and drop it into the upload area.
-								</p>
-							</div>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold text-lg mb-2'>
-									2. Choose Split Mode
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Split by page count, custom page ranges, or
-									extract every page into a separate file.
-								</p>
-							</div>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold text-lg mb-2'>
-									3. Download Results
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Download each split PDF file instantly after
-									processing is complete.
-								</p>
+					{file && (
+						<div className='bg-gray-50 p-4 rounded-lg'>
+							<div className='flex items-center gap-3'>
+								<FileText className='h-8 w-8 text-red-600' />
+								<div className='flex-1'>
+									<p className='font-medium'>{file.name}</p>
+									<p className='text-sm text-muted-foreground'>
+										{formatFileSize(file.size)}
+									</p>
+								</div>
 							</div>
 						</div>
-					</div>
+					)}
 
 					<div>
-						<h2 className='text-2xl font-bold mb-4'>
-							Why Use This PDF Splitter?
-						</h2>
-						<div className='grid md:grid-cols-2 gap-6'>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold mb-2'>
-									Fast and Easy
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Split PDF files in just a few clicks without
-									complicated software or technical skills.
-								</p>
+						<Label htmlFor='splitMode'>Split Mode</Label>
+						<Select value={splitMode} onValueChange={setSplitMode}>
+							<SelectTrigger>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value='pages'>
+									Split by pages per file
+								</SelectItem>
+								<SelectItem value='ranges'>
+									Split by page ranges
+								</SelectItem>
+								<SelectItem value='single'>
+									Extract each page separately
+								</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
+
+					{splitMode === "pages" && (
+						<div>
+							<Label htmlFor='pagesPerFile'>Pages per file</Label>
+							<Input
+								id='pagesPerFile'
+								type='number'
+								min='1'
+								value={pagesPerFile}
+								onChange={(e) => setPagesPerFile(e.target.value)}
+								placeholder='e.g., 5'
+							/>
+							<p className='text-xs text-muted-foreground mt-1'>
+								Number of pages to include in each split file
+							</p>
+						</div>
+					)}
+
+					{splitMode === "ranges" && (
+						<div>
+							<Label htmlFor='pageRanges'>Page ranges</Label>
+							<Input
+								id='pageRanges'
+								value={pageRanges}
+								onChange={(e) => setPageRanges(e.target.value)}
+								placeholder='e.g., 1-5, 10-15, 20'
+							/>
+							<p className='text-xs text-muted-foreground mt-1'>
+								Comma-separated ranges (e.g., 1-5, 10-15, 20)
+							</p>
+						</div>
+					)}
+
+					<Button
+						onClick={splitPDF}
+						disabled={!file || isSplitting}
+						className='w-full'>
+						<Split className='h-4 w-4 mr-2' />
+						{isSplitting ? "Splitting..." : "Split PDF"}
+					</Button>
+
+					{isSplitting && (
+						<div className='space-y-2'>
+							<Progress value={progress} />
+							<p className='text-sm text-center text-muted-foreground'>
+								{progress}% complete
+							</p>
+						</div>
+					)}
+				</CardContent>
+			</Card>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Split Results</CardTitle>
+					<CardDescription>
+						Download your split PDF files
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					{result ? (
+						<div className='space-y-4'>
+							<div className='flex items-center justify-between'>
+								<Badge variant='outline' className='text-lg px-3 py-1'>
+									{result.totalFiles} files created
+								</Badge>
+								<Button onClick={downloadAll} variant='outline' size='sm'>
+									<Package className='h-4 w-4 mr-2' />
+									Download All
+								</Button>
 							</div>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold mb-2'>
-									Useful for Work and Study
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Separate reports, assignments, contracts,
-									invoices, notes, and presentations into
-									smaller files.
-								</p>
-							</div>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold mb-2'>
-									No Complex Software Needed
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Use the tool directly in your browser
-									without installing desktop applications.
-								</p>
-							</div>
-							<div className='border rounded-xl p-5'>
-								<h3 className='font-semibold mb-2'>
-									Better File Organization
-								</h3>
-								<p className='text-sm text-muted-foreground leading-6'>
-									Break long PDFs into smaller files so they
-									are easier to share, store, and manage.
-								</p>
+
+							<div className='max-h-64 overflow-y-auto space-y-2'>
+								{result.files.map((file, index) => (
+									<div key={index} className='bg-gray-50 p-3 rounded-lg'>
+										<div className='flex items-center gap-3'>
+											<FileText className='h-6 w-6 text-red-600 flex-shrink-0' />
+											<div className='flex-1 min-w-0'>
+												<p className='font-medium truncate'>{file.name}</p>
+												<p className='text-sm text-muted-foreground'>
+													{file.pages}
+												</p>
+											</div>
+											<Button
+												onClick={() =>
+													downloadFile(file.downloadUrl, file.name)
+												}
+												variant='outline'
+												size='sm'>
+												<Download className='h-4 w-4' />
+											</Button>
+										</div>
+									</div>
+								))}
 							</div>
 						</div>
-					</div>
+					) : (
+						<div className='text-center py-12 text-muted-foreground'>
+							<Split className='h-12 w-12 mx-auto mb-4 opacity-50' />
+							<p>Upload and split a PDF to see results</p>
+						</div>
+					)}
+				</CardContent>
+			</Card>
 
-					<div>
-						<h2 className='text-2xl font-bold mb-4'>
-							Common Uses of a PDF Splitter
-						</h2>
-						<ul className='list-disc pl-6 space-y-3 text-muted-foreground leading-7'>
-							<li>Split a large PDF book into chapters</li>
-							<li>Extract invoice pages from a report</li>
-							<li>Separate student assignments by page range</li>
-							<li>Save each scanned page as a separate PDF</li>
-							<li>Divide contracts into smaller sections</li>
-							<li>Prepare files for email sharing</li>
-						</ul>
-					</div>
-
-					<div>
-						<h2 className='text-2xl font-bold mb-4'>
-							PDF Splitter FAQ
-						</h2>
-						<div className='space-y-6'>
-							<div>
-								<h3 className='font-semibold text-lg mb-2'>
-									Is this PDF Splitter free to use?
-								</h3>
-								<p className='text-muted-foreground leading-7'>
-									Yes, you can split PDF files online for free
-									using this tool.
-								</p>
-							</div>
-
-							<div>
-								<h3 className='font-semibold text-lg mb-2'>
-									Can I split PDF by page ranges?
-								</h3>
-								<p className='text-muted-foreground leading-7'>
-									Yes. You can enter custom page ranges such
-									as 1-5, 8-10, or single pages like 12.
-								</p>
-							</div>
-
-							<div>
-								<h3 className='font-semibold text-lg mb-2'>
-									Can I extract each page separately?
-								</h3>
-								<p className='text-muted-foreground leading-7'>
-									Yes. The tool includes a mode that creates
-									one PDF file for each page in your
-									document.
-								</p>
-							</div>
-
-							<div>
-								<h3 className='font-semibold text-lg mb-2'>
-									Why should I split a PDF?
-								</h3>
-								<p className='text-muted-foreground leading-7'>
-									Splitting a PDF helps reduce file size,
-									extract important pages, improve sharing, and
-									make large documents easier to organize.
-								</p>
-							</div>
+			<Card className='lg:col-span-2'>
+				<CardHeader>
+					<CardTitle className='flex items-center gap-2'>
+						<AlertCircle className='h-5 w-5' />
+						How to Use PDF Splitter
+					</CardTitle>
+				</CardHeader>
+				<CardContent>
+					<div className='grid md:grid-cols-3 gap-6'>
+						<div>
+							<h4 className='font-medium mb-3'>Split by Pages:</h4>
+							<ul className='space-y-2 text-sm text-muted-foreground'>
+								<li>• Set number of pages per file</li>
+								<li>• Creates equal-sized files</li>
+								<li>• Good for dividing large documents</li>
+							</ul>
+						</div>
+						<div>
+							<h4 className='font-medium mb-3'>Split by Ranges:</h4>
+							<ul className='space-y-2 text-sm text-muted-foreground'>
+								<li>• Specify exact page ranges</li>
+								<li>• Use format: 1-5, 10-15, 20</li>
+								<li>• Extract specific sections</li>
+							</ul>
+						</div>
+						<div>
+							<h4 className='font-medium mb-3'>Extract Pages:</h4>
+							<ul className='space-y-2 text-sm text-muted-foreground'>
+								<li>• Creates one file per page</li>
+								<li>• Useful for individual pages</li>
+								<li>• Maximum flexibility</li>
+							</ul>
 						</div>
 					</div>
-
-					<div className='border rounded-xl p-6 bg-muted/30'>
-						<h2 className='text-2xl font-bold mb-4'>
-							Final Note
-						</h2>
-						<p className='text-muted-foreground leading-7'>
-							If your PDF is too large or contains many sections,
-							this PDF Splitter tool makes it easier to separate
-							only the pages you need. It is designed for
-							everyday use, whether you are handling office
-							documents, school files, business reports, or
-							personal paperwork.
-						</p>
-					</div>
-				</section>
-			</div>
+				</CardContent>
+			</Card>
 		</div>
 	);
 }
